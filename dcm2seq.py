@@ -89,7 +89,7 @@ def main():
             dcm = pydicom.dcmread(fn, stop_before_pixels=True)
             dcm_files.append([fn] + [dcm.get(tag) for tag in key_tags])
         except Exception as e:
-            logger.warning(e)
+            logger.warning({'filename': fn, 'exception': e})
 
     df = pd.DataFrame(dcm_files, columns=['filepath'] + key_tags)
 
