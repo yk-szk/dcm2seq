@@ -1,6 +1,8 @@
 import argparse
 from pathlib import Path
 from datetime import datetime
+import tempfile
+import shutil
 import numpy as np
 import pandas as pd
 import tqdm
@@ -9,6 +11,7 @@ from pydicom.valuerep import DT
 import SimpleITK as sitk
 
 from logging import basicConfig, getLogger, Formatter, FileHandler, INFO
+
 basicConfig(level=INFO, format='%(asctime)s %(levelname)s :%(message)s')
 log_format = Formatter('%(asctime)s %(levelname)s :%(message)s')
 logger = getLogger(__name__)
@@ -64,7 +67,13 @@ def main():
         handler.setFormatter(log_format)
         logger.addHandler(handler)
 
-    root_dir = Path(args.input)
+    if args.input.endswith('.zip'):
+        tempdir = tempfile.TemporaryDirectory()
+        logger.info(tempdir.name)
+        shutil.unpack_archive(args.input, tempdir.name)
+        root_dir = Path(tempdir.name)
+    else:
+        root_dir = Path(args.input)
     out_dir = Path(args.output)
 
     compression = {'auto': None, 'true': True, 'false': False}[args.compress]
@@ -81,7 +90,8 @@ def main():
 
     key_tags = [
         'PatientID', 'SeriesInstanceUID', 'AcquisitionDate', 'AcquisitionTime',
-        'ImageOrientationPatient', 'ImagePositionPatient'
+        'SeriesDate', 'SeriesTime', 'ImageOrientationPatient',
+        'ImagePositionPatient'
     ]
     dcm_files = []
     for fn in tqdm.tqdm(all_files):
@@ -96,8 +106,12 @@ def main():
     logger.info('Convert dicom files')
 
     def sort_dicom(df):
-        orientation = np.array(df['ImageOrientationPatient'].iloc[0]).reshape(
-            (2, 3))
+        try:
+            orientation = np.array(
+                df['ImageOrientationPatient'].iloc[0]).reshape((2, 3))
+        except Exception as e:
+            print(np.array(df['ImageOrientationPatient'].iloc[0]))
+            return df
         third_axis = np.cross(orientation[0], orientation[1])
         locs = df['ImagePositionPatient'].map(lambda p: np.dot(third_axis, p))
         sorted_index = np.argsort(locs)
@@ -110,17 +124,27 @@ def main():
 
     for patient_id, df_patient in df.groupby('PatientID'):
         logger.info(patient_id)
-        sids, times = [], []
+        sids, aq_times, se_times = [], [], []
         for series_id, df_series in df_patient.groupby('SeriesInstanceUID'):
             sids.append(series_id)
-            dts = df_series.apply(
-                lambda row: DT(row.AcquisitionDate + row.AcquisitionTime),
+            aq_dts = df_series.apply(lambda row: DT(
+                row.AcquisitionDate + row.AcquisitionTime).timestamp(),
+                                     axis=1).tolist()
+            se_dts = df_series.apply(
+                lambda row: DT(row.SeriesDate + row.SeriesTime).timestamp(),
                 axis=1).tolist()
             if len(df_series) <= 2:
-                times.append(dts[0])
+                aq_times.append(aq_dts[0])
+                se_times.append(se_times[0])
             else:
-                dts.sort()
-                times.append(dts[len(dts) // 2])
+                aq_dts.sort()
+                aq_times.append(aq_dts[len(aq_dts) // 2])
+                se_dts.sort()
+                se_times.append(se_dts[len(se_dts) // 2])
+        if np.all((np.array(aq_times) - aq_times[0]) == 0):
+            times = se_times  # GE
+        else:
+            times = aq_times  # Philips
         nums = np.argsort(np.argsort(times))
         series_id2series_number = dict(zip(sids, nums))
 
