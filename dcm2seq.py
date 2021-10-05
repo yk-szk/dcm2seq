@@ -97,6 +97,9 @@ def main():
     for fn in tqdm.tqdm(all_files):
         try:
             dcm = pydicom.dcmread(fn, stop_before_pixels=True)
+            for tag in key_tags:
+                if not hasattr(dcm, tag):
+                    raise RuntimeError(tag + 'Not found.')
             dcm_files.append([fn] + [dcm.get(tag) for tag in key_tags])
         except Exception as e:
             logger.warning({'filename': fn, 'exception': e})
