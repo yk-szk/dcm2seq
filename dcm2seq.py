@@ -90,8 +90,7 @@ def main():
 
     key_tags = [
         'PatientID', 'SeriesInstanceUID', 'AcquisitionDate', 'AcquisitionTime',
-        'SeriesDate', 'SeriesTime', 'ImageOrientationPatient',
-        'ImagePositionPatient'
+        'ImageOrientationPatient', 'ImagePositionPatient'
     ]
     dcm_files = []
     for fn in tqdm.tqdm(all_files):
@@ -127,27 +126,17 @@ def main():
 
     for patient_id, df_patient in df.groupby('PatientID'):
         logger.info(patient_id)
-        sids, aq_times, se_times = [], [], []
+        sids, times = [], []
         for series_id, df_series in df_patient.groupby('SeriesInstanceUID'):
             sids.append(series_id)
-            aq_dts = df_series.apply(lambda row: DT(
-                row.AcquisitionDate + row.AcquisitionTime).timestamp(),
-                                     axis=1).tolist()
-            se_dts = df_series.apply(
-                lambda row: DT(row.SeriesDate + row.SeriesTime).timestamp(),
+            dts = df_series.apply(
+                lambda row: DT(row.AcquisitionDate + row.AcquisitionTime),
                 axis=1).tolist()
             if len(df_series) <= 2:
-                aq_times.append(aq_dts[0])
-                se_times.append(se_times[0])
+                times.append(dts[0])
             else:
-                aq_dts.sort()
-                aq_times.append(aq_dts[len(aq_dts) // 2])
-                se_dts.sort()
-                se_times.append(se_dts[len(se_dts) // 2])
-        if np.all((np.array(aq_times) - aq_times[0]) == 0):
-            times = se_times  # GE
-        else:
-            times = aq_times  # Philips
+                dts.sort()
+                times.append(dts[len(dts) // 2])
         nums = np.argsort(np.argsort(times))
         series_id2series_number = dict(zip(sids, nums))
 
