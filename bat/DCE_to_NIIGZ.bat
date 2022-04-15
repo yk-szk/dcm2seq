@@ -13,7 +13,7 @@ echo %output_path%
 
 :loop
 if "%~1" == "" goto end
-"%python%" "%script_dir%\dcm2seq.py" %1 "%output_path%" --description description.csv --verbose 1 --prefix Dyn_ --offset 1 --logdir "%script_dir%\logs"
+"%python%" "%script_dir%\dcm2seq.py" %1 "%output_path%" --description description.csv --verbose 1 --prefix Dyn_ --offset 1 --logdir "%script_dir%\logs" --ext .nii.gz
 
 shift
 goto loop
