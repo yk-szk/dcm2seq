@@ -1,6 +1,6 @@
 import argparse
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 import tempfile
 import shutil
 import math
@@ -98,11 +98,10 @@ def main():
     ]
 
     key_tags = [
-        'PatientID', 'SeriesInstanceUID', 'SeriesDate', 'SeriesTime',
-        'AcquisitionDate', 'AcquisitionTime', 'InstanceCreationDate',
-        'InstanceCreationTime', 'SeriesDescription', 'ImageOrientationPatient',
-        'ImagePositionPatient', 'Manufacturer'
+        'PatientID', 'SeriesInstanceUID', 'SeriesDescription', 'Manufacturer'
     ]
+    date_tags = ['SeriesDate', 'AcquisitionDate', 'InstanceCreationDate']
+    time_tags = ['SeriesTime', 'AcquisitionTime', 'InstanceCreationTime']
     dcm_files = []
     for fn in tqdm.tqdm(all_files):
         try:
@@ -110,11 +109,19 @@ def main():
             for tag in key_tags:
                 if not hasattr(dcm, tag):
                     raise RuntimeError(tag + 'Not found.')
-            dcm_files.append([fn] + [dcm.get(tag) for tag in key_tags])
+            values = [dcm.get(tag) for tag in key_tags]
+            values = values + [
+                dcm.get(tag, datetime(1970, 1, 1, 0, 0)) for tag in date_tags
+            ]
+            values = values + [
+                dcm.get(tag, timedelta()) for tag in time_tags
+            ]
+            dcm_files.append([fn] + values)
         except Exception as e:
             logger.warning({'filename': fn, 'exception': e})
 
-    df = pd.DataFrame(dcm_files, columns=['filepath'] + key_tags)
+    df = pd.DataFrame(dcm_files,
+                      columns=['filepath'] + key_tags + date_tags + time_tags)
 
     logger.info('Convert dicom files')
 
@@ -170,7 +177,7 @@ def main():
         series_id2time = dict(zip(df_times['sid'], times_str))
 
         ketasuu = math.ceil(math.log10(max(
-            series_id2series_number.values()))) + 1
+            series_id2series_number.values()) + 1))
         output_desc_pair = []
         for series_id, df_series in df_patient.groupby('SeriesInstanceUID'):
             logger.debug(series_id)
@@ -178,14 +185,15 @@ def main():
             output_filename = patient_dir / (prefix + '{num:0{width}d}'.format(
                 num=series_id2series_number[series_id], width=ketasuu) + ext)
             output_filename.parent.mkdir(parents=True, exist_ok=True)
-            output_desc_pair.append(
-                ('{}/{}'.format(patient_id, output_filename.name),
-                 '{},{}'.format(df_series['SeriesDescription'].iloc[0],
-                                series_id2time[series_id])))
-            filenames = sort_dicom(df_series)['filepath'].tolist()
+            # filenames = sort_dicom(df_series)['filepath'].tolist()
             reader = sitk.ImageSeriesReader()
+            filenames = reader.GetGDCMSeriesFileNames(str(root_dir), series_id, recursive=True)
             reader.SetFileNames(filenames)
-            image = reader.Execute()
+            try:
+                image = reader.Execute()
+            except Exception as e:
+                print(e)
+                continue
             if image.GetPixelID() == sitk.sitkFloat64 and dtype is None:
                 f = sitk.CastImageFilter()
                 f.SetOutputPixelType(sitk.sitkFloat32)
@@ -196,6 +204,10 @@ def main():
             writer.SetUseCompression(compression)
             writer.SetFileName(str(output_filename))
             writer.Execute(image)
+            output_desc_pair.append(
+                ('{}/{}'.format(patient_id, output_filename.name),
+                 '{},{}'.format(df_series['SeriesDescription'].iloc[0],
+                                series_id2time[series_id])))
 
         output_desc_pair.sort(key=lambda e: e[0])
         if args.description:
